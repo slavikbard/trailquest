@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrailQuest 🏕️ — הרפתקה!</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="game-body">
+
+  <!-- ── Header ─────────────────────────────── -->
+  <header class="game-header">
+    <div class="game-trail-name" id="trailNameDisplay">🏕️</div>
+    <div class="progress-bar-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressBar">
+      <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
+    </div>
+    <div class="game-score" id="score" aria-live="polite">⭐ 0</div>
+  </header>
+
+  <!-- ── Quest View ──────────────────────────── -->
+  <main class="game-main" id="questView">
+
+    <p class="quest-counter" id="questCounter">טוענים...</p>
+
+    <div class="quest-card" id="questCard">
+      <div class="quest-card-header find" id="questCardHeader">
+        <span class="quest-type-badge" id="questTypeBadge">🔍 מצאו</span>
+        <span class="quest-emoji" id="questEmoji" role="img">🌿</span>
+      </div>
+      <div class="quest-card-body">
+        <h2 class="quest-title" id="questTitle">מתחילים...</h2>
+        <p class="quest-mission" id="questMission"></p>
+        <button class="hint-btn" id="hintBtn" onclick="toggleHint()">💡 רמז</button>
+        <div class="hint-text" id="hintText" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <div class="game-actions">
+      <button class="complete-btn" onclick="completeQuest()">✅ השלמתי את המשימה!</button>
+      <button class="skip-btn"    onclick="skipQuest()">⏭️ אתגר הבא</button>
+      <button class="home-link"   onclick="goHome()">חזרה לעמוד הבית</button>
+    </div>
+
+  </main>
+
+  <!-- ── Completion Screen ───────────────────── -->
+  <div class="completion-screen" id="completionScreen" role="region" aria-label="סיום המשחק">
+    <div class="completion-emoji" id="completionEmoji" role="img">🎉</div>
+    <h1 class="completion-title">כל הכבוד!</h1>
+    <div class="stars-container" id="stars" aria-label="דירוג">⭐</div>
+    <div class="completion-score-wrap">
+      <div class="completion-score" id="finalScore">0</div>
+      <div class="completion-score-label">נקודות</div>
+    </div>
+    <p class="completion-subtitle" id="completionSubtitle"></p>
+    <button class="home-btn" onclick="goHome()">🏠 חזרה לעמוד הבית</button>
+  </div>
+
+  <script>
+    /* ── Init ──────────────────────────────── */
+    const params    = new URLSearchParams(window.location.search);
+    const trailName = (params.get('trail') || 'הטיול שלנו').slice(0, 40);
+    const ageGroup  = params.get('age') || '7-10';
+
+    let quests       = [];
+    let currentIndex = 0;
+    let score        = 0;
+    let completed    = 0;
+    let skipped      = 0;
+
+    const TYPE_LABELS = {
+      find:      '🔍 מצאו',
+      riddle:    '🧩 חידה',
+      challenge: '⚡ אתגר',
+      observe:   '👁️ תצפית',
+    };
+
+    const FINISH_EMOJIS = ['🎉', '🏆', '🌟', '🦁', '🎊', '🥳'];
+
+    document.getElementById('trailNameDisplay').textContent = '🏕️ ' + trailName;
+
+    /* ── Load quests ───────────────────────── */
+    async function init() {
+      try {
+        const res  = await fetch('data/quests.json');
+        const data = await res.json();
+        quests = shuffle(data[ageGroup] || data['7-10']);
+        renderQuest();
+      } catch (err) {
+        document.getElementById('questTitle').textContent   = 'שגיאה בטעינה';
+        document.getElementById('questMission').textContent = 'נסו לרענן את הדף';
+        document.getElementById('questCounter').textContent = '⚠️';
+      }
+    }
+
+    /* ── Fisher-Yates shuffle ──────────────── */
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    /* ── Render current quest ──────────────── */
+    function renderQuest() {
+      if (currentIndex >= quests.length) { showCompletion(); return; }
+
+      const quest = quests[currentIndex];
+      const total = quests.length;
+
+      // Progress
+      document.getElementById('questCounter').textContent =
+        'משימה ' + (currentIndex + 1) + ' מתוך ' + total;
+      const pct = Math.round((currentIndex / total) * 100);
+      document.getElementById('progressFill').style.width = pct + '%';
+      document.getElementById('progressBar').setAttribute('aria-valuenow', pct);
+
+      // Content
+      document.getElementById('questCardHeader').className = 'quest-card-header ' + quest.type;
+      document.getElementById('questEmoji').textContent     = quest.emoji;
+      document.getElementById('questTypeBadge').textContent = TYPE_LABELS[quest.type] || quest.type;
+      document.getElementById('questTitle').textContent     = quest.title;
+      document.getElementById('questMission').textContent   = quest.mission;
+      document.getElementById('hintText').textContent       = quest.hint;
+
+      // Reset hint
+      document.getElementById('hintText').classList.remove('visible');
+      document.getElementById('hintBtn').textContent = '💡 רמז';
+
+      // Animate card
+      const card = document.getElementById('questCard');
+      card.classList.remove('card-enter');
+      void card.offsetWidth; // force reflow
+      card.classList.add('card-enter');
+    }
+
+    /* ── Complete quest ────────────────────── */
+    function completeQuest() {
+      if (currentIndex >= quests.length) return;
+      score += quests[currentIndex].points;
+      completed++;
+
+      const scoreEl = document.getElementById('score');
+      scoreEl.textContent = '⭐ ' + score;
+      scoreEl.classList.remove('score-bump');
+      void scoreEl.offsetWidth;
+      scoreEl.classList.add('score-bump');
+
+      currentIndex++;
+      renderQuest();
+    }
+
+    /* ── Skip quest ────────────────────────── */
+    function skipQuest() {
+      if (currentIndex >= quests.length) return;
+      skipped++;
+      currentIndex++;
+      renderQuest();
+    }
+
+    /* ── Toggle hint ───────────────────────── */
+    function toggleHint() {
+      const hintEl = document.getElementById('hintText');
+      const btnEl  = document.getElementById('hintBtn');
+      if (hintEl.classList.contains('visible')) {
+        hintEl.classList.remove('visible');
+        btnEl.textContent = '💡 רמז';
+      } else {
+        hintEl.classList.add('visible');
+        btnEl.textContent = '🙈 הסתר רמז';
+      }
+    }
+
+    /* ── Show completion ───────────────────── */
+    function showCompletion() {
+      document.getElementById('questView').style.display = 'none';
+      document.getElementById('completionScreen').classList.add('active');
+
+      document.getElementById('progressFill').style.width = '100%';
+      document.getElementById('progressBar').setAttribute('aria-valuenow', 100);
+
+      const maxScore = quests.reduce((s, q) => s + q.points, 0);
+      const pct      = maxScore > 0 ? (score / maxScore) * 100 : 0;
+
+      document.getElementById('finalScore').textContent = score;
+      document.getElementById('completionEmoji').textContent =
+        FINISH_EMOJIS[Math.floor(Math.random() * FINISH_EMOJIS.length)];
+
+      let stars = '⭐';
+      if (pct >= 75) stars = '⭐⭐⭐';
+      else if (pct >= 45) stars = '⭐⭐';
+      document.getElementById('stars').textContent = stars;
+
+      document.getElementById('completionSubtitle').textContent =
+        'השלמתם ' + completed + ' משימות ← דילגתם על ' + skipped;
+    }
+
+    /* ── Go home ───────────────────────────── */
+    function goHome() {
+      window.location.href = 'index.html';
+    }
+
+    init();
+  </script>
+
+</body>
+</html>
