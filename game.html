@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrailQuest 🏕️ — חידון!</title>
+  <title>TrailQuest 🏕️ — משימות!</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800;900&display=swap" rel="stylesheet">
@@ -15,23 +15,10 @@
   <div id="loadingScreen" class="loading-overlay">
     <div class="loading-box">
       <span class="loading-emoji">🏕️</span>
-      <p class="loading-msg">מכינים שאלות על</p>
+      <p class="loading-msg">מכינים משימות על</p>
       <p class="loading-trail" id="loadingTrail">...</p>
       <div class="loading-dots">
         <span></span><span></span><span></span>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── מודאל מפתח API ─────────────────────── -->
-  <div id="apiModal" class="modal-overlay hidden">
-    <div class="modal-box">
-      <h3>🔑 מפתח Claude API</h3>
-      <p>הזינו מפתח API כדי לקבל שאלות מותאמות למקום הטיול שלכם</p>
-      <input type="password" id="apiKeyInput" class="form-input" placeholder="sk-ant-...">
-      <div class="modal-actions">
-        <button onclick="saveApiKey()" class="btn-save-key">שמור ✓</button>
-        <button onclick="closeApiModal()" class="btn-cancel">ביטול</button>
       </div>
     </div>
   </div>
@@ -44,43 +31,32 @@
       <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
     </div>
     <div class="game-score" id="score" aria-live="polite">⭐ 0</div>
-    <button class="settings-btn" onclick="openApiModal()" title="הגדרות API">⚙️</button>
   </header>
 
-  <!-- ── מסך חידון ──────────────────────────── -->
+  <!-- ── מסך משימות ─────────────────────────── -->
   <main class="game-main" id="questView" style="display:none">
 
-    <p class="quest-counter" id="questCounter">שאלה 1 מתוך 8</p>
+    <p class="quest-counter" id="questCounter">משימה 1 מתוך 10</p>
 
     <div class="quest-card" id="questCard">
-      <div class="quest-card-header quiz">
+      <div class="quest-card-header find" id="questCardHeader">
+        <span class="quest-type-badge" id="questTypeBadge">🔍 חיפוש</span>
         <span class="quest-emoji" id="questEmoji" role="img">🌿</span>
       </div>
       <div class="quest-card-body">
+        <h2 class="quest-title" id="questTitle">...</h2>
         <p class="quest-mission" id="questText">...</p>
+        <button class="hint-btn" id="hintBtn">💡 רמז</button>
+        <p class="hint-text" id="hintText"></p>
       </div>
     </div>
 
-    <!-- אפשרויות בחירה -->
-    <div class="options-grid" id="optionsGrid">
-      <button class="option-btn" id="opt0" onclick="selectOption(0)"></button>
-      <button class="option-btn" id="opt1" onclick="selectOption(1)"></button>
-      <button class="option-btn" id="opt2" onclick="selectOption(2)"></button>
-      <button class="option-btn" id="opt3" onclick="selectOption(3)"></button>
+    <div class="game-actions">
+      <button class="complete-btn" id="completeBtn">✅ סיימתי!</button>
+      <button class="skip-btn" id="skipBtn">דלג ←</button>
     </div>
 
-    <!-- פידבק -->
-    <div class="feedback-area hidden" id="feedbackArea">
-      <span id="feedbackIcon"></span>
-      <span id="feedbackText"></span>
-    </div>
-
-    <!-- כפתור הבא — מופיע רק אחרי תשובה נכונה -->
-    <button class="next-btn hidden" id="nextBtn" onclick="nextQuestion()">
-      שאלה הבאה ←
-    </button>
-
-    <button class="home-link" onclick="goHome()">חזרה לעמוד הבית</button>
+    <button class="home-link" id="homeLink">חזרה לעמוד הבית</button>
 
   </main>
 
@@ -94,153 +70,62 @@
       <div class="completion-score-label">נקודות</div>
     </div>
     <p class="completion-subtitle" id="completionSubtitle"></p>
-    <button class="home-btn" onclick="goHome()">🏠 חזרה לעמוד הבית</button>
+    <button class="home-btn" id="homeBtn">🏠 חזרה לעמוד הבית</button>
   </div>
 
-  <script>
-    /* ── קריאת פרמטרים ─────────────────────── */
+  <script type="module">
+    import { generateQuests } from './js/gemini.js';
+
     const params    = new URLSearchParams(window.location.search);
     const trailName = (params.get('trail') || 'הטיול שלנו').slice(0, 40);
     const ageGroup  = params.get('age') || '7-10';
 
-    document.getElementById('trailNameDisplay').textContent = '🏕️ ' + trailName;
-    document.getElementById('loadingTrail').textContent = trailName;
+    let quests         = [];
+    let currentIndex   = 0;
+    let score          = 0;
+    let completedCount = 0;
 
-    let questions    = [];
-    let currentIndex = 0;
-    let score        = 0;
-    let correctCount = 0;
-    let locked       = false;
-
-    const LABELS      = ['א', 'ב', 'ג', 'ד'];
-    const FINISH_EMOJIS = ['🎉', '🏆', '🌟', '🦁', '🎊', '🥳'];
-
-    /* ── ניהול מפתח API ────────────────────── */
-    function openApiModal() {
-      document.getElementById('apiKeyInput').value = localStorage.getItem('tq_api_key') || '';
-      document.getElementById('apiModal').classList.remove('hidden');
-    }
-
-    function closeApiModal() {
-      document.getElementById('apiModal').classList.add('hidden');
-    }
-
-    function saveApiKey() {
-      const key = document.getElementById('apiKeyInput').value.trim();
-      if (key) localStorage.setItem('tq_api_key', key);
-      else localStorage.removeItem('tq_api_key');
-      closeApiModal();
-    }
-
-    /* ── קריאה ל-Claude API ────────────────── */
-    async function fetchFromClaude() {
-      const apiKey = localStorage.getItem('tq_api_key');
-      if (!apiKey) return null;
-
-      const difficulty = ageGroup === '4-6'   ? 'מאוד קל ופשוט לגיל 4-6 — שאלות בסיסיות'
-                       : ageGroup === '7-10'  ? 'בינוני לגיל 7-10 — ידע טבע ומדע'
-                       : 'מאתגר לגיל 11-14 — שאלות מעמיקות';
-
-      const prompt = `
-אתה יוצר חידון לילדים בעברית על טיול בטבע.
-מיקום הטיול: "${trailName}" בישראל.
-רמת קושי: ${difficulty}.
-
-צור 8 שאלות חידון בעברית שקשורות ישירות למקום "${trailName}" — גאוגרפיה, טבע, היסטוריה, צמחייה, בעלי חיים, מזג אוויר, או מיוחדות של המקום.
-לכל שאלה 4 תשובות אפשריות, רק אחת נכונה.
-
-החזר JSON בלבד ללא טקסט נוסף:
-[
-  {
-    "emoji": "🌿",
-    "question": "טקסט השאלה כאן",
-    "options": ["תשובה א", "תשובה ב", "תשובה ג", "תשובה ד"],
-    "answer": 0
-  }
-]
-
-answer הוא האינדקס (0-3) של התשובה הנכונה.`;
-
-      try {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json',
-            'anthropic-dangerous-direct-browser-access': 'true'
-          },
-          body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 2048,
-            messages: [{ role: 'user', content: prompt }]
-          })
-        });
-
-        if (!res.ok) return null;
-        const data  = await res.json();
-        const text  = data.content[0].text;
-        const match = text.match(/\[[\s\S]*\]/);
-        if (!match) return null;
-        const parsed = JSON.parse(match[0]);
-        if (Array.isArray(parsed) && parsed.length >= 4) return parsed;
-        return null;
-      } catch (e) {
-        console.error('Claude API error:', e);
-        return null;
-      }
-    }
-
-    /* ── שאלות סטטיות (גיבוי) ─────────────── */
-    const STATIC_QUESTIONS = {
-      '4-6': [
-        { emoji:'🐝', question:'מי מייצר דבש?',                          options:['דבורים','פרפרים','נמלים','ציפורים'],                      answer:0 },
-        { emoji:'🌳', question:'מה שותה עץ כדי לגדול?',                  options:['מים מהאדמה','מיץ תפוחים','חלב','שוקולד'],               answer:0 },
-        { emoji:'🐛', question:'מה הופך לפרפר?',                         options:['זחל','נמלה','חיפושית','תולעת'],                          answer:0 },
-        { emoji:'🍂', question:'בסתיו, עלי העצים...',                    options:['נופלים לקרקע','גדלים גדולים','הופכים ירוקים','נשארים'],  answer:0 },
-        { emoji:'🪨', question:'למה אבנות ליד נחל חלקות?',               options:['המים שוחקים אותן','ילדים ליטפו','הרוח','השמש'],           answer:0 },
-        { emoji:'☀️', question:'לאיזה כיוון השמש יוצאת בבוקר?',         options:['מזרח','מערב','צפון','דרום'],                             answer:0 },
-        { emoji:'🦔', question:'לאיזה חיה יש קוצים על הגב?',            options:['קיפוד','ארנב','שועל','עכבר'],                            answer:0 },
-        { emoji:'🌿', question:'מה צמח צריך כדי לגדול?',                 options:['שמש, מים ואוויר','שוקולד וסוכר','אבנות ועפר','חול ומלח'],answer:0 },
-      ],
-      '7-10': [
-        { emoji:'🌿', question:'מה תפקיד העלים של העץ?',                 options:['לייצר מזון מהשמש','לאגור מים בלבד','להגן מרוח','למשוך ציפורים'],     answer:0 },
-        { emoji:'🌳', question:'כיצד יודעים את גיל עץ שנכרת?',          options:['סופרים טבעות בגזע','מודדים גובה','סופרים ענפים','בצבע הקליפה'],     answer:0 },
-        { emoji:'🦋', question:'מה שם התהליך שבו זחל הופך לפרפר?',      options:['מטמורפוזה','פוטוסינתזה','התפרקות','הבקעה'],                           answer:0 },
-        { emoji:'🐜', question:'נמלה יכולה לשאת משקל של פי כמה?',       options:['פי 50 ממשקלה','פי 2 ממשקלה','כמו משקלה','פי 5'],                      answer:0 },
-        { emoji:'🔬', question:'מה הם חזזיות (לישיות) על סלעים?',       options:['שיתוף פטרייה ואצה','סוג עלים','פרחים קטנים','שרשי עץ'],              answer:0 },
-        { emoji:'💧', question:'מה שרשרת המזון מתחילה בה תמיד?',        options:['צמח (יצרן)','חיית טרף','חרק','פטרייה'],                              answer:0 },
-        { emoji:'🌱', question:'מה שם תהליך ייצור המזון של הצמח?',      options:['פוטוסינתזה','נשימה','התפרקות','השקיה'],                               answer:0 },
-        { emoji:'🌊', question:'מה גורם לנהר לזרום?',                   options:['כוח הכבידה','הרוח','הירח','חום השמש'],                                answer:0 },
-      ],
-      '11-14': [
-        { emoji:'🧭', question:'בצהריים — לאיזה כיוון פונה השמש בישראל?',     options:['דרום','צפון','מזרח','מערב'],                                     answer:0 },
-        { emoji:'🌿', question:'מה נקרא יחס שבו שני מינים נהנים זה מזה?',    options:['מוטואליזם','טפילות','תחרות','פרדציה'],                           answer:0 },
-        { emoji:'🪨', question:'מאיזה חומר עשוי אבן גיר?',                   options:['שרידי יצורים ימיים','לבה מתקררת','חול נדחס','טיט מיובש'],        answer:0 },
-        { emoji:'🌳', question:'מה נקרא מערכת של יצורים חיים ואי-חיים יחד?', options:['אקוסיסטם','ביוספרה','גנום','פנוטיפ'],                            answer:0 },
-        { emoji:'🔭', question:'כיצד מחשבים גובה עץ ללא מכשירים?',          options:['יחס צל אדם לצל עץ','ספירת ענפים','עובי גזע','ספירת טבעות'],      answer:0 },
-        { emoji:'🌍', question:'מה משמעות "מגוון ביולוגי"?',                 options:['מספר המינים השונים באזור','כמות הצמחים','אורך שרשרת המזון','גיל הסביבה'], answer:0 },
-        { emoji:'💧', question:'מה גורם לשחיקת אבנות בנחל?',                options:['חיכוך המים','לחץ האוויר','שינויי טמפרטורה','כבידה ישירה'],       answer:0 },
-        { emoji:'🌱', question:'מה ייחודי לצמחים בבתי גידול יבשים?',        options:['שורשים עמוקים ועלים קטנים','שורשים קצרים','עלים רחבים','גבעולים חלולים'], answer:0 },
-      ],
+    const TYPE_LABELS = {
+      find:      { label: '🔍 חיפוש',  css: 'find'      },
+      challenge: { label: '🏆 אתגר',   css: 'challenge' },
+      observe:   { label: '👀 תצפית',  css: 'observe'   },
+      riddle:    { label: '🧩 חידה',   css: 'riddle'    },
     };
 
-    /* ── טעינת שאלות ───────────────────────── */
-    async function init() {
-      const apiQuestions = await fetchFromClaude();
+    const FINISH_EMOJIS = ['🎉', '🏆', '🌟', '🦁', '🎊', '🥳'];
 
-      if (apiQuestions && apiQuestions.length >= 4) {
-        questions = apiQuestions;
+    /* ── Init ────────────────────────────────── */
+    async function init() {
+      document.getElementById('trailNameDisplay').textContent = '🏕️ ' + trailName;
+      document.getElementById('loadingTrail').textContent     = trailName;
+
+      const geminiQuests = await generateQuests(trailName, ageGroup);
+
+      if (geminiQuests && geminiQuests.length >= 5) {
+        quests = geminiQuests.slice(0, 10);
       } else {
-        questions = shuffle([...(STATIC_QUESTIONS[ageGroup] || STATIC_QUESTIONS['7-10'])]);
+        quests = await loadFallbackQuests();
       }
 
       document.getElementById('loadingScreen').style.display = 'none';
-      document.getElementById('questView').style.display    = 'flex';
-      renderQuestion();
+      document.getElementById('questView').style.display     = 'flex';
+      renderQuest();
     }
 
-    /* ── ערבוב מערך ────────────────────────── */
+    /* ── Fallback: quests.json ───────────────── */
+    async function loadFallbackQuests() {
+      try {
+        const res  = await fetch('./data/quests.json');
+        if (!res.ok) throw new Error('fetch failed');
+        const data = await res.json();
+        const pool = data[ageGroup] || data['7-10'] || [];
+        return shuffle([...pool]).slice(0, 10);
+      } catch {
+        return [];
+      }
+    }
+
+    /* ── Shuffle ─────────────────────────────── */
     function shuffle(arr) {
       const a = [...arr];
       for (let i = a.length - 1; i > 0; i--) {
@@ -250,101 +135,76 @@ answer הוא האינדקס (0-3) של התשובה הנכונה.`;
       return a;
     }
 
-    /* ── הצגת שאלה ─────────────────────────── */
-    function renderQuestion() {
-      if (currentIndex >= questions.length) { showCompletion(); return; }
+    /* ── Render quest ────────────────────────── */
+    function renderQuest() {
+      if (currentIndex >= quests.length) { showCompletion(); return; }
 
-      const q     = questions[currentIndex];
-      const total = questions.length;
-      locked = false;
+      const q     = quests[currentIndex];
+      const total = quests.length;
 
-      // progress
+      // Counter + progress bar
       document.getElementById('questCounter').textContent =
-        'שאלה ' + (currentIndex + 1) + ' מתוך ' + total;
+        'משימה ' + (currentIndex + 1) + ' מתוך ' + total;
       const pct = Math.round((currentIndex / total) * 100);
       document.getElementById('progressFill').style.width = pct + '%';
       document.getElementById('progressBar').setAttribute('aria-valuenow', pct);
 
-      // content
-      document.getElementById('questEmoji').textContent = q.emoji || '🌿';
-      document.getElementById('questText').textContent  = q.question;
+      // Type badge + header colour
+      const typeInfo = TYPE_LABELS[q.type] || { label: '⭐ משימה', css: 'find' };
+      document.getElementById('questCardHeader').className =
+        'quest-card-header ' + typeInfo.css;
+      document.getElementById('questTypeBadge').textContent = typeInfo.label;
 
-      // options
-      q.options.forEach((opt, i) => {
-        const btn = document.getElementById('opt' + i);
-        btn.textContent = LABELS[i] + '. ' + opt;
-        btn.className   = 'option-btn';
-        btn.disabled    = false;
-      });
+      // Content
+      document.getElementById('questEmoji').textContent = q.emoji   || '🌿';
+      document.getElementById('questTitle').textContent  = q.title   || '';
+      document.getElementById('questText').textContent   = q.mission || '';
 
-      // reset
-      document.getElementById('feedbackArea').classList.add('hidden');
-      document.getElementById('nextBtn').classList.add('hidden');
+      // Hint (reset hidden)
+      const hintText = document.getElementById('hintText');
+      hintText.textContent = q.hint || '';
+      hintText.classList.remove('visible');
+      document.getElementById('hintBtn').textContent = '💡 רמז';
 
-      // animation
+      // Entrance animation
       const card = document.getElementById('questCard');
       card.classList.remove('card-enter');
       void card.offsetWidth;
       card.classList.add('card-enter');
     }
 
-    /* ── בחירת תשובה ───────────────────────── */
-    function selectOption(index) {
-      if (locked) return;
-
-      const q         = questions[currentIndex];
-      const isCorrect = index === q.answer;
-
-      if (isCorrect) {
-        locked = true;
-        score += 10;
-        correctCount++;
-
-        document.getElementById('opt' + index).classList.add('correct');
-        [0, 1, 2, 3].forEach(i => { document.getElementById('opt' + i).disabled = true; });
-
-        // score bump
-        const scoreEl = document.getElementById('score');
-        scoreEl.textContent = '⭐ ' + score;
-        scoreEl.classList.remove('score-bump');
-        void scoreEl.offsetWidth;
-        scoreEl.classList.add('score-bump');
-
-        showFeedback(true);
-        document.getElementById('nextBtn').classList.remove('hidden');
-
-      } else {
-        // סמן שגוי — אפשר לנסות שנית
-        const btn = document.getElementById('opt' + index);
-        btn.classList.add('wrong');
-        btn.disabled = true;
-        showFeedback(false);
-      }
+    /* ── Hint toggle ─────────────────────────── */
+    function toggleHint() {
+      const hintText = document.getElementById('hintText');
+      const hintBtn  = document.getElementById('hintBtn');
+      const showing  = hintText.classList.contains('visible');
+      hintText.classList.toggle('visible', !showing);
+      hintBtn.textContent = showing ? '💡 רמז' : '💡 הסתר רמז';
     }
 
-    /* ── הצגת פידבק ────────────────────────── */
-    function showFeedback(correct) {
-      const area = document.getElementById('feedbackArea');
-      area.classList.remove('hidden', 'feedback-correct', 'feedback-wrong');
+    /* ── Complete quest ──────────────────────── */
+    function completeQuest() {
+      const points = quests[currentIndex].points || 10;
+      score += points;
+      completedCount++;
 
-      if (correct) {
-        area.classList.add('feedback-correct');
-        document.getElementById('feedbackIcon').textContent = '✅';
-        document.getElementById('feedbackText').textContent = 'נכון! כל הכבוד! 🎉';
-      } else {
-        area.classList.add('feedback-wrong');
-        document.getElementById('feedbackIcon').textContent = '❌';
-        document.getElementById('feedbackText').textContent = 'לא נכון — נסו שוב!';
-      }
-    }
+      const scoreEl = document.getElementById('score');
+      scoreEl.textContent = '⭐ ' + score;
+      scoreEl.classList.remove('score-bump');
+      void scoreEl.offsetWidth;
+      scoreEl.classList.add('score-bump');
 
-    /* ── שאלה הבאה ─────────────────────────── */
-    function nextQuestion() {
       currentIndex++;
-      renderQuestion();
+      setTimeout(renderQuest, 180);
     }
 
-    /* ── מסך סיום ──────────────────────────── */
+    /* ── Skip quest ──────────────────────────── */
+    function skipQuest() {
+      currentIndex++;
+      renderQuest();
+    }
+
+    /* ── Completion screen ───────────────────── */
     function showCompletion() {
       document.getElementById('questView').style.display = 'none';
       document.getElementById('completionScreen').classList.add('active');
@@ -352,26 +212,30 @@ answer הוא האינדקס (0-3) של התשובה הנכונה.`;
       document.getElementById('progressFill').style.width = '100%';
       document.getElementById('progressBar').setAttribute('aria-valuenow', 100);
 
-      const total = questions.length;
-      const pct   = total > 0 ? (correctCount / total) * 100 : 0;
+      const total = quests.length;
+      const pct   = total > 0 ? (completedCount / total) * 100 : 0;
 
       document.getElementById('finalScore').textContent = score;
       document.getElementById('completionEmoji').textContent =
         FINISH_EMOJIS[Math.floor(Math.random() * FINISH_EMOJIS.length)];
 
       let stars = '⭐';
-      if (pct >= 90) stars = '⭐⭐⭐';
-      else if (pct >= 60) stars = '⭐⭐';
+      if (pct >= 80) stars = '⭐⭐⭐';
+      else if (pct >= 50) stars = '⭐⭐';
       document.getElementById('stars').textContent = stars;
 
       document.getElementById('completionSubtitle').textContent =
-        'ענית נכון על ' + correctCount + ' שאלות מתוך ' + total + ' על ' + trailName + '! 🌟';
+        'השלמת ' + completedCount + ' משימות מתוך ' + total + ' ב' + trailName + '! 🌟';
     }
 
-    /* ── חזרה הביתה ────────────────────────── */
-    function goHome() {
-      window.location.href = 'index.html';
-    }
+    /* ── Event listeners ─────────────────────── */
+    document.getElementById('hintBtn').addEventListener('click', toggleHint);
+    document.getElementById('completeBtn').addEventListener('click', completeQuest);
+    document.getElementById('skipBtn').addEventListener('click', skipQuest);
+    document.getElementById('homeLink').addEventListener('click',
+      () => { window.location.href = 'index.html'; });
+    document.getElementById('homeBtn').addEventListener('click',
+      () => { window.location.href = 'index.html'; });
 
     init();
   </script>
