@@ -44,6 +44,14 @@
         <p class="error-msg" id="ageError">נא לבחור קבוצת גיל 🙏</p>
       </div>
 
+      <div class="form-group">
+        <label class="form-label">בחרו סוג המשחק:</label>
+        <div class="mode-buttons" role="group" aria-label="סוג משחק">
+          <button class="mode-btn active" data-mode="quiz"   onclick="selectMode(this)">🧠 חידון שאלות</button>
+          <button class="mode-btn"        data-mode="quests" onclick="selectMode(this)">🏃 משימות הרפתקה</button>
+        </div>
+      </div>
+
       <button class="start-btn" onclick="startGame()">
         התחילו את הרפתקה! 🚀
       </button>
@@ -63,9 +71,14 @@
       document.getElementById('ageError').style.display = 'none';
     }
 
+    function selectMode(btn) {
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+
     function startGame() {
-      const input = document.getElementById('trailName');
-      const trail = input.value.trim();
+      const input     = document.getElementById('trailName');
+      const trail     = input.value.trim();
       const activeAge = document.querySelector('.age-btn.active');
       let ok = true;
 
@@ -86,7 +99,9 @@
 
       if (!ok) return;
 
-      const params = new URLSearchParams({ trail, age: activeAge.dataset.age });
+      const activeMode = document.querySelector('.mode-btn.active');
+      const mode = activeMode ? activeMode.dataset.mode : 'quiz';
+      const params = new URLSearchParams({ trail, age: activeAge.dataset.age, mode });
       window.location.href = 'game.html?' + params.toString();
     }
 

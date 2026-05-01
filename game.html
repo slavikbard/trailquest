@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrailQuest 🏕️ — משימות!</title>
+  <title>TrailQuest 🏕️</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800;900&display=swap" rel="stylesheet">
@@ -15,7 +15,7 @@
   <div id="loadingScreen" class="loading-overlay">
     <div class="loading-box">
       <span class="loading-emoji">🏕️</span>
-      <p class="loading-msg">מכינים משימות על</p>
+      <p class="loading-msg" id="loadingMsg">מכינים שאלות על</p>
       <p class="loading-trail" id="loadingTrail">...</p>
       <div class="loading-dots">
         <span></span><span></span><span></span>
@@ -33,30 +33,50 @@
     <div class="game-score" id="score" aria-live="polite">⭐ 0</div>
   </header>
 
-  <!-- ── מסך משימות ─────────────────────────── -->
+  <!-- ── אזור המשחק ─────────────────────────── -->
   <main class="game-main" id="questView" style="display:none">
 
-    <p class="quest-counter" id="questCounter">משימה 1 מתוך 10</p>
+    <p class="quest-counter" id="questCounter">שאלה 1 מתוך 8</p>
 
+    <!-- כרטיס משותף לשני המצבים -->
     <div class="quest-card" id="questCard">
-      <div class="quest-card-header find" id="questCardHeader">
-        <span class="quest-type-badge" id="questTypeBadge">🔍 חיפוש</span>
+      <div class="quest-card-header quiz" id="questCardHeader">
+        <span class="quest-type-badge" id="questTypeBadge">❓ שאלה</span>
         <span class="quest-emoji" id="questEmoji" role="img">🌿</span>
       </div>
       <div class="quest-card-body">
-        <h2 class="quest-title" id="questTitle">...</h2>
-        <p class="quest-mission" id="questText">...</p>
-        <button class="hint-btn" id="hintBtn">💡 רמז</button>
-        <p class="hint-text" id="hintText"></p>
+        <h2 class="quest-title" id="questTitle" style="display:none"></h2>
+        <p class="quest-mission" id="questText"></p>
       </div>
     </div>
 
-    <div class="game-actions">
-      <button class="complete-btn" id="completeBtn">✅ סיימתי!</button>
-      <button class="skip-btn" id="skipBtn">דלג ←</button>
+    <!-- ── מצב חידון ──────────────────────────── -->
+    <div id="quizSection" style="display:none; width:100%; max-width:440px">
+      <button class="back-btn hidden" id="backBtn">→ שאלה קודמת</button>
+      <div class="options-grid" id="optionsGrid">
+        <button class="option-btn" id="opt0"></button>
+        <button class="option-btn" id="opt1"></button>
+        <button class="option-btn" id="opt2"></button>
+        <button class="option-btn" id="opt3"></button>
+      </div>
+      <div class="feedback-area hidden" id="feedbackArea">
+        <span id="feedbackIcon"></span>
+        <span id="feedbackText"></span>
+      </div>
+      <button class="next-btn hidden" id="nextBtn">שאלה הבאה ←</button>
     </div>
 
-    <button class="home-link" id="homeLink">חזרה לעמוד הבית</button>
+    <!-- ── מצב משימות ─────────────────────────── -->
+    <div id="questSection" style="display:none; width:100%; max-width:440px">
+      <button class="hint-btn" id="hintBtn">💡 רמז</button>
+      <p class="hint-text" id="hintText"></p>
+      <div class="game-actions" style="margin-top:10px">
+        <button class="complete-btn" id="completeBtn">✅ סיימתי!</button>
+        <button class="skip-btn" id="skipBtn">דלג ←</button>
+      </div>
+    </div>
+
+    <button class="home-link" id="homeLink" style="margin-top:14px">חזרה לעמוד הבית</button>
 
   </main>
 
@@ -74,16 +94,22 @@
   </div>
 
   <script type="module">
-    import { generateQuests } from './js/gemini.js';
+    import { generateQuiz, generateQuests } from './js/gemini.js';
 
+    /* ── פרמטרים ─────────────────────────────── */
     const params    = new URLSearchParams(window.location.search);
     const trailName = (params.get('trail') || 'הטיול שלנו').slice(0, 40);
-    const ageGroup  = params.get('age') || '7-10';
+    const ageGroup  = params.get('age')   || '7-10';
+    const mode      = params.get('mode')  || 'quiz';   // 'quiz' | 'quests'
 
-    let quests         = [];
-    let currentIndex   = 0;
-    let score          = 0;
-    let completedCount = 0;
+    let items            = [];
+    let currentIndex     = 0;
+    let score            = 0;
+    let completedCount   = 0;
+    let locked           = false;                      // quiz: prevents double-click
+    const answeredRight  = new Set();                  // quiz: indices answered correctly
+
+    const LABELS = ['א', 'ב', 'ג', 'ד'];
 
     const TYPE_LABELS = {
       find:      { label: '🔍 חיפוש',  css: 'find'      },
@@ -94,38 +120,78 @@
 
     const FINISH_EMOJIS = ['🎉', '🏆', '🌟', '🦁', '🎊', '🥳'];
 
+    /* ── שאלות סטטיות (גיבוי לחידון) ────────── */
+    const STATIC_QUIZ = {
+      '4-6': [
+        { emoji:'🐝', question:'מי מייצר דבש?',                         options:['דבורים','פרפרים','נמלים','ציפורים'],                      answer:0 },
+        { emoji:'🌳', question:'מה שותה עץ כדי לגדול?',                 options:['מים מהאדמה','מיץ תפוחים','חלב','שוקולד'],               answer:0 },
+        { emoji:'🐛', question:'מה הופך לפרפר?',                        options:['זחל','נמלה','חיפושית','תולעת'],                          answer:0 },
+        { emoji:'🍂', question:'בסתיו, עלי העצים...',                   options:['נופלים לקרקע','גדלים גדולים','הופכים ירוקים','נשארים'], answer:0 },
+        { emoji:'🪨', question:'למה אבנים ליד נחל חלקות?',              options:['המים שוחקים אותן','ילדים ליטפו','הרוח','השמש'],          answer:0 },
+        { emoji:'☀️', question:'לאיזה כיוון השמש יוצאת בבוקר?',        options:['מזרח','מערב','צפון','דרום'],                             answer:0 },
+        { emoji:'🦔', question:'לאיזה חיה יש קוצים על הגב?',           options:['קיפוד','ארנב','שועל','עכבר'],                            answer:0 },
+        { emoji:'🌿', question:'מה צמח צריך כדי לגדול?',                options:['שמש, מים ואוויר','שוקולד וסוכר','אבנים ועפר','חול ומלח'],answer:0 },
+      ],
+      '7-10': [
+        { emoji:'🌿', question:'מה תפקיד העלים של העץ?',                options:['לייצר מזון מהשמש','לאגור מים בלבד','להגן מרוח','למשוך ציפורים'],     answer:0 },
+        { emoji:'🌳', question:'כיצד יודעים את גיל עץ שנכרת?',         options:['סופרים טבעות בגזע','מודדים גובה','סופרים ענפים','בצבע הקליפה'],     answer:0 },
+        { emoji:'🦋', question:'מה שם התהליך שבו זחל הופך לפרפר?',     options:['מטמורפוזה','פוטוסינתזה','התפרקות','הבקעה'],                          answer:0 },
+        { emoji:'🐜', question:'נמלה יכולה לשאת משקל של פי כמה?',      options:['פי 50 ממשקלה','פי 2 ממשקלה','כמו משקלה','פי 5'],                     answer:0 },
+        { emoji:'🔬', question:'מה הם חזזיות (לישיות) על סלעים?',      options:['שיתוף פטרייה ואצה','סוג עלים','פרחים קטנים','שרשי עץ'],             answer:0 },
+        { emoji:'💧', question:'ממה מתחילה שרשרת המזון תמיד?',         options:['צמח (יצרן)','חיית טרף','חרק','פטרייה'],                             answer:0 },
+        { emoji:'🌱', question:'מה שם תהליך ייצור המזון של הצמח?',     options:['פוטוסינתזה','נשימה','התפרקות','השקיה'],                              answer:0 },
+        { emoji:'🌊', question:'מה גורם לנהר לזרום?',                  options:['כוח הכבידה','הרוח','הירח','חום השמש'],                               answer:0 },
+      ],
+      '11-14': [
+        { emoji:'🧭', question:'בצהריים, לאיזה כיוון פונה השמש בישראל?', options:['דרום','צפון','מזרח','מערב'],                                     answer:0 },
+        { emoji:'🌿', question:'מה נקרא יחס שבו שני מינים נהנים זה מזה?', options:['מוטואליזם','טפילות','תחרות','פרדציה'],                          answer:0 },
+        { emoji:'🪨', question:'מאיזה חומר עשוי אבן גיר?',              options:['שרידי יצורים ימיים','לבה מתקררת','חול נדחס','טיט מיובש'],        answer:0 },
+        { emoji:'🌳', question:'מה נקרא מערכת יצורים חיים ואי-חיים יחד?', options:['אקוסיסטם','ביוספרה','גנום','פנוטיפ'],                          answer:0 },
+        { emoji:'🔭', question:'כיצד מחשבים גובה עץ ללא מכשירים?',     options:['יחס צל אדם לצל עץ','ספירת ענפים','עובי גזע','ספירת טבעות'],      answer:0 },
+        { emoji:'🌍', question:'מה משמעות "מגוון ביולוגי"?',            options:['מספר המינים השונים באזור','כמות הצמחים','אורך שרשרת המזון','גיל הסביבה'], answer:0 },
+        { emoji:'💧', question:'מה גורם לשחיקת אבנים בנחל?',           options:['חיכוך המים','לחץ האוויר','שינויי טמפרטורה','כבידה ישירה'],       answer:0 },
+        { emoji:'🌱', question:'מה ייחודי לצמחים בבתי גידול יבשים?',   options:['שורשים עמוקים ועלים קטנים','שורשים קצרים','עלים רחבים','גבעולים חלולים'], answer:0 },
+      ],
+    };
+
     /* ── Init ────────────────────────────────── */
     async function init() {
       document.getElementById('trailNameDisplay').textContent = '🏕️ ' + trailName;
       document.getElementById('loadingTrail').textContent     = trailName;
 
-      const geminiQuests = await generateQuests(trailName, ageGroup);
+      if (mode === 'quiz') {
+        document.getElementById('loadingMsg').textContent = 'מכינים שאלות על';
+        document.getElementById('quizSection').style.display = 'block';
 
-      if (geminiQuests && geminiQuests.length >= 5) {
-        quests = geminiQuests.slice(0, 10);
+        const generated = await generateQuiz(trailName, ageGroup);
+        items = generated || shuffle([...(STATIC_QUIZ[ageGroup] || STATIC_QUIZ['7-10'])]);
+
       } else {
-        quests = await loadFallbackQuests();
+        document.getElementById('loadingMsg').textContent = 'מכינים משימות על';
+        document.getElementById('questSection').style.display = 'block';
+
+        const generated = await generateQuests(trailName, ageGroup);
+        items = (generated && generated.length >= 5)
+          ? generated.slice(0, 10)
+          : await loadFallbackQuests();
       }
 
       document.getElementById('loadingScreen').style.display = 'none';
       document.getElementById('questView').style.display     = 'flex';
-      renderQuest();
+      render();
     }
 
-    /* ── Fallback: quests.json ───────────────── */
+    /* ── גיבוי משימות ────────────────────────── */
     async function loadFallbackQuests() {
       try {
         const res  = await fetch('./data/quests.json');
-        if (!res.ok) throw new Error('fetch failed');
+        if (!res.ok) throw new Error();
         const data = await res.json();
-        const pool = data[ageGroup] || data['7-10'] || [];
-        return shuffle([...pool]).slice(0, 10);
-      } catch {
-        return [];
-      }
+        return shuffle([...(data[ageGroup] || data['7-10'] || [])]).slice(0, 10);
+      } catch { return []; }
     }
 
-    /* ── Shuffle ─────────────────────────────── */
+    /* ── ערבוב ───────────────────────────────── */
     function shuffle(arr) {
       const a = [...arr];
       for (let i = a.length - 1; i > 0; i--) {
@@ -135,45 +201,147 @@
       return a;
     }
 
-    /* ── Render quest ────────────────────────── */
-    function renderQuest() {
-      if (currentIndex >= quests.length) { showCompletion(); return; }
+    /* ── רינדור (dispatch) ───────────────────── */
+    function render() {
+      if (currentIndex >= items.length) { showCompletion(); return; }
 
-      const q     = quests[currentIndex];
-      const total = quests.length;
+      const item  = items[currentIndex];
+      const total = items.length;
 
-      // Counter + progress bar
+      // counter + progress
+      const label = mode === 'quiz' ? 'שאלה' : 'משימה';
       document.getElementById('questCounter').textContent =
-        'משימה ' + (currentIndex + 1) + ' מתוך ' + total;
+        `${label} ${currentIndex + 1} מתוך ${total}`;
       const pct = Math.round((currentIndex / total) * 100);
       document.getElementById('progressFill').style.width = pct + '%';
       document.getElementById('progressBar').setAttribute('aria-valuenow', pct);
 
-      // Type badge + header colour
-      const typeInfo = TYPE_LABELS[q.type] || { label: '⭐ משימה', css: 'find' };
-      document.getElementById('questCardHeader').className =
-        'quest-card-header ' + typeInfo.css;
-      document.getElementById('questTypeBadge').textContent = typeInfo.label;
+      if (mode === 'quiz') renderQuiz(item);
+      else                  renderQuest(item);
 
-      // Content
-      document.getElementById('questEmoji').textContent = q.emoji   || '🌿';
-      document.getElementById('questTitle').textContent  = q.title   || '';
-      document.getElementById('questText').textContent   = q.mission || '';
-
-      // Hint (reset hidden)
-      const hintText = document.getElementById('hintText');
-      hintText.textContent = q.hint || '';
-      hintText.classList.remove('visible');
-      document.getElementById('hintBtn').textContent = '💡 רמז';
-
-      // Entrance animation
+      // אנימציית כניסה
       const card = document.getElementById('questCard');
       card.classList.remove('card-enter');
       void card.offsetWidth;
       card.classList.add('card-enter');
     }
 
-    /* ── Hint toggle ─────────────────────────── */
+    /* ── רינדור שאלת חידון ───────────────────── */
+    function renderQuiz(q) {
+      // כפתור חזרה
+      document.getElementById('backBtn').classList.toggle('hidden', currentIndex === 0);
+
+      // כותרת הכרטיס
+      document.getElementById('questCardHeader').className = 'quest-card-header quiz';
+      document.getElementById('questTypeBadge').textContent = '❓ שאלה';
+      document.getElementById('questEmoji').textContent      = q.emoji || '🧠';
+
+      // טקסט השאלה (ללא כותרת)
+      document.getElementById('questTitle').style.display = 'none';
+      document.getElementById('questText').textContent    = q.question;
+
+      if (answeredRight.has(currentIndex)) {
+        // כבר ענו נכון — הצג שוב את הכרטיס במצב נעול
+        locked = true;
+        q.options.forEach((opt, i) => {
+          const btn = document.getElementById('opt' + i);
+          btn.textContent  = LABELS[i] + '. ' + opt;
+          btn.className    = 'option-btn' + (i === q.answer ? ' correct' : '');
+          btn.disabled     = true;
+        });
+        const area = document.getElementById('feedbackArea');
+        area.className = 'feedback-area feedback-correct';
+        document.getElementById('feedbackIcon').textContent = '✅';
+        document.getElementById('feedbackText').textContent = 'כבר ענית נכון על זו! 🎉';
+        document.getElementById('nextBtn').classList.remove('hidden');
+      } else {
+        // שאלה חדשה / לא נענתה עדיין
+        locked = false;
+        q.options.forEach((opt, i) => {
+          const btn = document.getElementById('opt' + i);
+          btn.textContent = LABELS[i] + '. ' + opt;
+          btn.className   = 'option-btn';
+          btn.disabled    = false;
+        });
+        document.getElementById('feedbackArea').classList.add('hidden');
+        document.getElementById('nextBtn').classList.add('hidden');
+      }
+    }
+
+    /* ── רינדור משימת הרפתקה ─────────────────── */
+    function renderQuest(q) {
+      const typeInfo = TYPE_LABELS[q.type] || { label: '⭐ משימה', css: 'find' };
+      document.getElementById('questCardHeader').className  = 'quest-card-header ' + typeInfo.css;
+      document.getElementById('questTypeBadge').textContent = typeInfo.label;
+      document.getElementById('questEmoji').textContent     = q.emoji   || '🌿';
+
+      document.getElementById('questTitle').style.display  = 'block';
+      document.getElementById('questTitle').textContent    = q.title   || '';
+      document.getElementById('questText').textContent     = q.mission || '';
+
+      const hintText = document.getElementById('hintText');
+      hintText.textContent = q.hint || '';
+      hintText.classList.remove('visible');
+      document.getElementById('hintBtn').textContent = '💡 רמז';
+    }
+
+    /* ── חידון: בחירת תשובה ──────────────────── */
+    function selectOption(index) {
+      if (locked) return;
+      const q         = items[currentIndex];
+      const isCorrect = index === q.answer;
+
+      if (isCorrect) {
+        locked = true;
+
+        // ניקוד רק אם לא ענינו על שאלה זו קודם
+        if (!answeredRight.has(currentIndex)) {
+          score += 10;
+          completedCount++;
+          answeredRight.add(currentIndex);
+
+          const scoreEl = document.getElementById('score');
+          scoreEl.textContent = '⭐ ' + score;
+          scoreEl.classList.remove('score-bump');
+          void scoreEl.offsetWidth;
+          scoreEl.classList.add('score-bump');
+        }
+
+        document.getElementById('opt' + index).classList.add('correct');
+        [0,1,2,3].forEach(i => { document.getElementById('opt' + i).disabled = true; });
+
+        const area = document.getElementById('feedbackArea');
+        area.className = 'feedback-area feedback-correct';
+        document.getElementById('feedbackIcon').textContent = '✅';
+        document.getElementById('feedbackText').textContent = 'נכון! כל הכבוד! 🎉';
+        document.getElementById('nextBtn').classList.remove('hidden');
+
+      } else {
+        const btn = document.getElementById('opt' + index);
+        btn.classList.add('wrong');
+        btn.disabled = true;
+
+        const area = document.getElementById('feedbackArea');
+        area.className = 'feedback-area feedback-wrong';
+        document.getElementById('feedbackIcon').textContent = '❌';
+        document.getElementById('feedbackText').textContent = 'לא נכון — נסו שנית!';
+      }
+    }
+
+    /* ── חידון: חזרה לשאלה קודמת ────────────── */
+    function goBack() {
+      if (currentIndex === 0) return;
+      currentIndex--;
+      render();
+    }
+
+    /* ── חידון: שאלה הבאה ────────────────────── */
+    function nextItem() {
+      currentIndex++;
+      render();
+    }
+
+    /* ── משימות: הצג רמז ─────────────────────── */
     function toggleHint() {
       const hintText = document.getElementById('hintText');
       const hintBtn  = document.getElementById('hintBtn');
@@ -182,10 +350,10 @@
       hintBtn.textContent = showing ? '💡 רמז' : '💡 הסתר רמז';
     }
 
-    /* ── Complete quest ──────────────────────── */
+    /* ── משימות: סיימתי ──────────────────────── */
     function completeQuest() {
-      const points = quests[currentIndex].points || 10;
-      score += points;
+      const q = items[currentIndex];
+      score += q.points || 10;
       completedCount++;
 
       const scoreEl = document.getElementById('score');
@@ -195,24 +363,23 @@
       scoreEl.classList.add('score-bump');
 
       currentIndex++;
-      setTimeout(renderQuest, 180);
+      setTimeout(render, 180);
     }
 
-    /* ── Skip quest ──────────────────────────── */
+    /* ── משימות: דלג ─────────────────────────── */
     function skipQuest() {
       currentIndex++;
-      renderQuest();
+      render();
     }
 
-    /* ── Completion screen ───────────────────── */
+    /* ── מסך סיום ────────────────────────────── */
     function showCompletion() {
       document.getElementById('questView').style.display = 'none';
       document.getElementById('completionScreen').classList.add('active');
-
       document.getElementById('progressFill').style.width = '100%';
       document.getElementById('progressBar').setAttribute('aria-valuenow', 100);
 
-      const total = quests.length;
+      const total = items.length;
       const pct   = total > 0 ? (completedCount / total) * 100 : 0;
 
       document.getElementById('finalScore').textContent = score;
@@ -224,18 +391,24 @@
       else if (pct >= 50) stars = '⭐⭐';
       document.getElementById('stars').textContent = stars;
 
-      document.getElementById('completionSubtitle').textContent =
-        'השלמת ' + completedCount + ' משימות מתוך ' + total + ' ב' + trailName + '! 🌟';
+      document.getElementById('completionSubtitle').textContent = mode === 'quiz'
+        ? `ענית נכון על ${completedCount} שאלות מתוך ${total} על ${trailName}! 🌟`
+        : `השלמת ${completedCount} משימות מתוך ${total} ב${trailName}! 🌟`;
     }
 
-    /* ── Event listeners ─────────────────────── */
+    /* ── מאזיני אירועים ──────────────────────── */
+    [0,1,2,3].forEach(i =>
+      document.getElementById('opt' + i).addEventListener('click', () => selectOption(i))
+    );
+    document.getElementById('backBtn').addEventListener('click', goBack);
+    document.getElementById('nextBtn').addEventListener('click', nextItem);
+
     document.getElementById('hintBtn').addEventListener('click', toggleHint);
     document.getElementById('completeBtn').addEventListener('click', completeQuest);
     document.getElementById('skipBtn').addEventListener('click', skipQuest);
-    document.getElementById('homeLink').addEventListener('click',
-      () => { window.location.href = 'index.html'; });
-    document.getElementById('homeBtn').addEventListener('click',
-      () => { window.location.href = 'index.html'; });
+
+    document.getElementById('homeLink').addEventListener('click', () => { window.location.href = 'index.html'; });
+    document.getElementById('homeBtn').addEventListener('click',  () => { window.location.href = 'index.html'; });
 
     init();
   </script>

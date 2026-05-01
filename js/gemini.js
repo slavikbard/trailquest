@@ -1,10 +1,6 @@
 /**
- * Generates location-based adventure quests via Gemini API.
- * Calls the API directly from the browser (suitable for static hosting).
- *
- * @param {string} trail - Trail / location name entered by the user
- * @param {string} age   - Age group: '4-6', '7-10', or '11-14'
- * @returns {Promise<Array|null>} Array of quest objects, or null if unavailable
+ * Gemini API module — browser-direct (no server required).
+ * Exports generateQuests (action quests) and generateQuiz (multiple-choice).
  */
 
 const GEMINI_API_KEY = 'AIzaSyABqmz1LtSZw2qNNk33cqkJMF7pISKKQ2Q';
@@ -16,6 +12,63 @@ const AGE_DESCRIPTIONS = {
   '11-14': 'גיל 11-14 — מאתגר, כולל מדע, ניתוח וחשיבה ביקורתית',
 };
 
+/**
+ * Generates multiple-choice quiz questions about a specific trail location.
+ * @returns {Promise<Array|null>} [{emoji, question, options:[4], answer:0-3}] or null
+ */
+export async function generateQuiz(trail, age) {
+  const difficulty =
+    age === '4-6'   ? 'מאוד קל ופשוט לגיל 4–6 — שאלות בסיסיות על טבע' :
+    age === '7-10'  ? 'בינוני לגיל 7–10 — ידע טבע, גאוגרפיה ומדע' :
+                      'מאתגר לגיל 11–14 — שאלות מעמיקות על טבע ומדע';
+
+  const prompt = `אתה מומחה לטבע וגאוגרפיה של ישראל, ואתה יוצר חידון שאלות לילדים בעברית תקינה.
+מיקום הטיול: "${trail}" בישראל.
+רמת קושי: ${difficulty}
+
+צור בדיוק 8 שאלות חידון שמתייחסות ספציפית ל"${trail}" — חיות, צמחים, גאוגרפיה, היסטוריה, מזג האוויר, או עובדות ייחודיות.
+לכל שאלה 4 תשובות אפשריות — רק אחת נכונה.
+
+החזר JSON בלבד, ללא טקסט נוסף:
+[
+  {
+    "emoji": "🌿",
+    "question": "טקסט השאלה כאן",
+    "options": ["תשובה א", "תשובה ב", "תשובה ג", "תשובה ד"],
+    "answer": 0
+  }
+]
+
+answer הוא האינדקס (0–3) של התשובה הנכונה.`;
+
+  try {
+    const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 2048, temperature: 0.75 },
+      }),
+    });
+
+    if (!res.ok) return null;
+    const data  = await res.json();
+    const text  = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return null;
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) return null;
+    const questions = JSON.parse(match[0]);
+    if (!Array.isArray(questions) || questions.length < 4) return null;
+    return questions;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generates location-based action quests (find / challenge / observe).
+ * @returns {Promise<Array|null>} Quest array or null if unavailable
+ */
 export async function generateQuests(trail, age) {
   const ageDesc = AGE_DESCRIPTIONS[age] || AGE_DESCRIPTIONS['7-10'];
 
